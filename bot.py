@@ -1,88 +1,63 @@
 import os
-import sys
 import time
 import asyncio
 import requests
+import discord
 
-try:
-    import discord_self as discord
-except ImportError:
-    import discord
-
-# ====== НАСТРОЙКИ: ЗАПОЛНИ СЕЙЧАС ======
-CHANNEL_ID = 1401775181025775738
+# ---------- настройки ----------
+TOKEN = os.environ["DISCORD_USER_TOKEN"]          # токен – только из переменной окружения!
+INT_CHANNEL_ID = 1401775181025775738
 WEBHOOK_URL = "https://discord.com/api/webhooks/1462757260659916890/RDh5763wE364uxKkVkXt_lyslZ8nwubNIuJutkntFBbyTjI-6bgd9CChrVccpASv6f-b"
-# =======================================
 
-TOKEN = os.environ.get("DISCORD_USER_TOKEN", "").strip()
-if not TOKEN:
-    print("❌ DISCORD_USER_TOKEN не задан в GitHub Secrets.")
-    sys.exit(1)
+# ---------- обрезка длинных сообщений ----------
+def truncate(text: str, max_len: int = 1500) -> str:
+    """Обрезает текст до max_len символов, добавляя многоточие."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 3] + "..."
 
-if not WEBHOOK_URL:
-    print("❌ WEBHOOK_URL не задан в коде.")
-    sys.exit(1)
-
-if not CHANNEL_ID:
-    print("❌ CHANNEL_ID не задан в коде.")
-    sys.exit(1)
-
-INT_CHANNEL_ID = int(CHANNEL_ID)
-
+# ---------- интенты ----------
 intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
 intents.messages = True
-
-
-def truncate(s: str, n: int = 1900) -> str:
-    s = s or ""
-    if len(s) <= n:
-        return s
-    return s[:n] + "…"
-
+intents.guilds = True
+intents.message_content = True   # обязательно для чтения содержимого сообщений
 
 class SelfBot(discord.Client):
     async def on_ready(self):
-        print(f"✅ Online as: {self.user} (id={self.user.id})")
-
-        ch = self.get_channel(INT_CHANNEL_ID)
-        if ch:
-            name = getattr(ch, "name", "???")
-            print(f"📡 Канал найден: #{name} ({ch.id})")
+        print(f"Logged in as {self.user} (ID: {self.user.id})")
+        channel = self.get_channel(INT_CHANNEL_ID)
+        if channel:
+            print(f"📡 Channel found: #{getattr(channel, 'name', '???')} ({channel.id})")
         else:
-            print(
-                f"❌ Канал с ID {INT_CHANNEL_ID} не найден в cache. "
-                "Возможно, нужно другое id (например, thread id)."
-            )
+            print(f"⚠️ Channel {INT_CHANNEL_ID} not in cache; will still try by ID.")
 
     async def post_to_webhook(self, payload: dict):
+        """Отправка payload в вебхук через отдельный поток (requests)."""
+        def do_post():
+            return requests.post(WEBHOOK_URL, json=payload, timeout=15)
+
         try:
-            r = await asyncio.to_thread(
-                requests.post, WEBHOOK_URL, json=payload, timeout=15
-            )
+            r = await asyncio.to_thread(do_post)
             print(f"   -> Webhook: {r.status_code}")
         except Exception as e:
             print(f"   -> Webhook error: {e}")
 
     async def on_message(self, msg):
         try:
-            if not getattr(msg, "channel", None):
-                return
-            if not getattr(msg, "author", None):
-                return
+            # Ждём, пока бот полностью загрузится
             if not self.user:
                 return
 
-            # Фильтр только нужного канала
-            if int(msg.channel.id) != INT_CHANNEL_ID:
+            # Проверяем, что сообщение из нужного канала
+            if not msg.channel or msg.channel.id != INT_CHANNEL_ID:
                 return
 
-            # Не форвардим свои сообщения self-bot'а
+            # Не пересылаем свои собственные сообщения
             if msg.author.id == self.user.id:
                 return
 
-            content = truncate(getattr(msg, "content", "") or "").strip()
+            # Текст сообщения
+            content = truncate(msg.content or "")
             if not content:
                 return
 
@@ -91,13 +66,12 @@ class SelfBot(discord.Client):
 
             payload = {
                 "content": f"📨 **{author}**: {content}",
-                "username": "Auto Joiner Logger",
+                "username": "FestoLogs Bot",
             }
             await self.post_to_webhook(payload)
 
         except Exception as e:
             print(f"⚠️ on_message error: {e}")
-
 
 if __name__ == "__main__":
     bot = SelfBot(intents=intents)
