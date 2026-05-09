@@ -21,8 +21,9 @@ jobs:
       
       - name: Install deps
         run: |
-          pip uninstall discord.py -y 2>/dev/null
+          pip uninstall discord discord.py -y 2>/dev/null || true
           pip install discord.py-self requests
+          pip show discord  # Покажет, что реально стоит
       
       - name: Run bot
         env:
@@ -31,10 +32,14 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           cat > bot.py << 'EOF'
-          import discord
-          import requests
-          import os
-          import time
+          import os, time, requests
+
+          # Пытаемся импортировать правильный модуль
+          try:
+              import discord
+              _ = discord.Intents  # проверка
+          except (ImportError, AttributeError):
+              import discord_self as discord
 
           TOKEN = os.environ["DISCORD_USER_TOKEN"]
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
@@ -55,23 +60,19 @@ jobs:
                   if channel:
                       print(f'Monitoring: #{channel.name} in {channel.guild.name}')
                   else:
-                      print(f'CHANNEL NOT FOUND! Check ID: {CHANNEL_ID}')
+                      print(f'CHANNEL NOT FOUND! ID: {CHANNEL_ID}')
 
               async def on_message(self, msg):
-                  if msg.channel.id != CHANNEL_ID:
+                  if msg.channel.id != CHANNEL_ID or msg.author == self.user:
                       return
-                  if msg.author == self.user:
-                      return
-                  
                   print(f'MSG: {msg.author}: {msg.content}')
-                  
                   try:
                       r = requests.post(WEBHOOK_URL, json={
                           "content": msg.content,
                           "username": str(msg.author),
                           "avatar_url": str(msg.author.avatar.url) if msg.author.avatar else None
                       })
-                      print(f'Webhook response: {r.status_code}')
+                      print(f'Webhook: {r.status_code}')
                   except Exception as e:
                       print(f'Webhook error: {e}')
 
