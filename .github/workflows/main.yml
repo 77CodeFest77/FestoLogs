@@ -20,10 +20,7 @@ jobs:
           python-version: '3.10'
       
       - name: Install deps
-        run: |
-          pip uninstall discord discord.py -y 2>/dev/null || true
-          pip install discord.py-self requests
-          pip show discord  # Покажет, что реально стоит
+        run: pip install discord.py-self requests
       
       - name: Run bot
         env:
