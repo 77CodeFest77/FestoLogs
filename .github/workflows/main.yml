@@ -23,10 +23,6 @@ jobs:
         run: |
           pip uninstall discord discord.py discord.py-self -y 2>/dev/null || true
           pip install --force-reinstall --no-cache-dir discord.py-self requests
-          echo "========== Installed packages =========="
-          pip list | grep -i discord
-          echo "========================================"
-          python -c "import discord_self; print('discord_self found:', discord_self.__version__)" || echo "discord_self NOT found"
       
       - name: Run bot
         env:
@@ -37,57 +33,65 @@ jobs:
           cat > bot.py << 'EOF'
           import os, time, requests
           
-          # Пробуем discord_self (правильный модуль self-бота)
+          # Пробуем discord_self, если нет — обычный discord
           try:
               import discord_self as discord
-              print("✅ Using discord_self")
+              print("✅ Использую discord_self")
           except ImportError:
               import discord
-              print("⚠️ Using discord (may not work)")
-
+              print("⚠️ Использую обычный discord")
+          
           TOKEN = os.environ["DISCORD_USER_TOKEN"]
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
           WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
-
-          # Настройка интентов (есть в discord_self)
+          print(f"Целевой канал ID: {CHANNEL_ID}")
+          print(f"Webhook URL: {WEBHOOK_URL[:50]}...")  # первые 50 символов для проверки
+          
           try:
               intents = discord.Intents.default()
               intents.message_content = True
               intents.guilds = True
               intents.messages = True
           except AttributeError:
-              # Если Intents нет, создаём клиент без них
               intents = None
-
+          
           class SelfBot(discord.Client):
               def __init__(self):
                   if intents:
                       super().__init__(intents=intents)
                   else:
                       super().__init__()
-
+          
               async def on_ready(self):
                   print(f'ONLINE as {self.user}')
                   channel = self.get_channel(CHANNEL_ID)
                   if channel:
-                      print(f'Monitoring: #{channel.name} in {channel.guild.name}')
+                      print(f'Мониторю канал: #{channel.name} на сервере {channel.guild.name}')
                   else:
-                      print(f'CHANNEL NOT FOUND! ID: {CHANNEL_ID}')
-
+                      print(f'КАНАЛ НЕ НАЙДЕН! Проверь ID: {CHANNEL_ID}')
+          
               async def on_message(self, msg):
-                  if msg.channel.id != CHANNEL_ID or msg.author == self.user:
+                  # Диагностика: показываем ВСЕ сообщения, которые видит бот
+                  print(f'DEBUG: Канал {msg.channel.id} | Автор ID {msg.author.id} | Бот ID {self.user.id}')
+                  print(f'DEBUG: Сообщение: {msg.content}')
+                  
+                  # Проверяем только канал, автора не фильтруем (может глючить)
+                  if msg.channel.id != CHANNEL_ID:
+                      print(f'DEBUG: Пропускаю (не тот канал)')
                       return
-                  print(f'MSG: {msg.author}: {msg.content}')
+                  
+                  print(f'>>>> ПЕРЕСЫЛАЮ: {msg.author}: {msg.content}')
                   try:
-                      r = requests.post(WEBHOOK_URL, json={
+                      # Отправляем без аватарки, чтобы исключить ошибку с ней
+                      payload = {
                           "content": msg.content,
-                          "username": str(msg.author),
-                          "avatar_url": str(msg.author.avatar.url) if msg.author.avatar else None
-                      })
-                      print(f'Webhook: {r.status_code}')
+                          "username": str(msg.author)
+                      }
+                      r = requests.post(WEBHOOK_URL, json=payload)
+                      print(f'Webhook ответ: {r.status_code} {r.text}')
                   except Exception as e:
-                      print(f'Webhook error: {e}')
-
+                      print(f'Webhook ошибка: {e}')
+          
           bot = SelfBot()
           while True:
               try:
