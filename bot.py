@@ -1,8 +1,6 @@
 import os
 import time
-import asyncio
 import requests
-import sys
 
 try:
     import discord_self as discord
@@ -10,52 +8,67 @@ except ImportError:
     import discord
 
 
-TOKEN = os.environ.get("DISCORD_USER_TOKEN", "").strip()
-raw_channel_id = os.environ.get("DISCORD_CHANNEL_ID", "0").strip()
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    value = value.strip().strip('"').strip("'")
+    if not value:
+        raise RuntimeError(f"Пустая переменная окружения: {name}")
+    return value
 
-if not TOKEN or not raw_channel_id or not WEBHOOK_URL:
-    print("❌ Не хватает секретов!")
-    print(
-        "Нужны: DISCORD_USER_TOKEN, DISCORD_CHANNEL_ID, DISCORD_WEBHOOK_URL"
+
+TOKEN = require_env("DISCORD_USER_TOKEN")
+
+raw_channel_id = require_env("DISCORD_CHANNEL_ID")
+try:
+    CHANNEL_ID = int(raw_channel_id)
+except ValueError:
+    raise RuntimeError(
+        f"DISCORD_CHANNEL_ID не является числом: {raw_channel_id!r}"
     )
-    sys.exit(1)
 
-raw_channel_id = raw_channel_id.strip().strip('"').strip("'")
-CHANNEL_ID = int(raw_channel_id)
+WEBHOOK_URL = require_env("DISCORD_WEBHOOK_URL")
 
 print(f"🔧 Запускаюсь с CHANNEL_ID={CHANNEL_ID}")
+print("🔧 Проверка env: OK (токен/вебхук не печатаю)")
 
 
-def build_payload(author_name: str, content: str) -> dict:
-    # В webhook "content" лучше отправлять строкой.
-    return {
-        "content": f"📨 **{author_name}**: {content}",
-        "username": "Auto Joiner Logger",
-    }
+intents = None
+try:
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.guilds = True
+    intents.messages = True
+except Exception:
+    intents = None
 
 
 class SelfBot(discord.Client):
-    async def on_ready(self):
-        print(f"✅ Онлайн как: {self.user} (id={self.user.id})")
+    def __init__(self):
+        if intents is not None:
+            super().__init__(intents=intents)
+        else:
+            super().__init__()
 
+    async def on_ready(self):
+        print(f"✅ Онлайн как: {self.user}")
         ch = self.get_channel(CHANNEL_ID)
         if ch:
-            print(f"📡 Слежу за каналом: #{getattr(ch, 'name', '???')} ({ch.id})")
+            print(f"📡 Канал: #{getattr(ch, 'name', '???')} ({ch.id})")
         else:
-            print(f"❌ Канал с ID {CHANNEL_ID} не найден!")
+            print(f"❌ Канал с ID {CHANNEL_ID} не найден в кэше")
 
     async def on_message(self, msg):
-        # self.user может быть None в самом начале
         if not getattr(self, "user", None):
             return
 
-        # 1) Канал
-        if int(msg.channel.id) != CHANNEL_ID:
+        # игнор своих
+        if msg.author and msg.author.id == self.user.id:
             return
 
-        # 2) Не форвардим сообщения самого бота
-        if msg.author and msg.author.id == self.user.id:
+        # фильтр по каналу
+        if not getattr(msg, "channel", None):
+            return
+        if int(msg.channel.id) != CHANNEL_ID:
             return
 
         content = (msg.content or "").strip()
@@ -64,23 +77,25 @@ class SelfBot(discord.Client):
 
         print(f"📨 {msg.author}: {content[:120]}")
 
-        payload = build_payload(str(msg.author), content)
+        payload = {
+            "content": f"📨 **{msg.author.name}**: {content}",
+            "username": "Auto Joiner Logger",
+        }
 
-        async def post_webhook():
-            try:
-                r = requests.post(WEBHOOK_URL, json=payload, timeout=15)
-                print(f"   -> Webhook: {r.status_code}")
-            except Exception as e:
-                print(f"   -> Webhook ошибка: {e}")
-
-        # HTTP без блокировки event loop
-        await asyncio.to_thread(post_webhook)
+        try:
+            r = await self.loop.run_in_executor(
+                None, lambda: requests.post(WEBHOOK_URL, json=payload, timeout=15)
+            )
+            print(f"   -> Webhook: {r.status_code}")
+        except Exception as e:
+            print(f"   -> Webhook ошибка: {e}")
 
 
-bot = SelfBot()
-while True:
-    try:
-        bot.run(TOKEN)
-    except Exception as e:
-        print(f"💥 Крах: {e}")
-        time.sleep(10)
+if __name__ == "__main__":
+    bot = SelfBot()
+    while True:
+        try:
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"💥 Крах: {e}")
+            time.sleep(10)
