@@ -1,28 +1,35 @@
-name: FestoLogs Bot
+name: FestkaForwarder_24/7
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # каждые 6 часов
-  workflow_dispatch:          # ручной запуск
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  run:
+  run-festka-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      - name: Установка зависимостей
+      - name: Install Dependencies
         run: |
-          pip uninstall discord -y 2>/dev/null || true
-          pip install --upgrade pip
-          pip install discord.py requests
+          python -m pip install --upgrade pip
+          pip install discord.py aiohttp requests
 
-      - name: Запуск бота
+      - name: Run Festka Forwarder
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-        run: python bot.py
+        run: |
+          python -u bot.py
