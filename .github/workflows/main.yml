@@ -9,21 +9,21 @@ jobs:
   server:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      
+
       - name: Install deps
         run: |
-          pip uninstall discord discord.py discord.py-self -y 2>/dev/null || true
-          pip install --force-reinstall --no-cache-dir discord.py-self requests
-      
+          pip uninstall discord discord.py discord.py-self discord_self -y 2>/dev/null || true
+          pip install --no-cache-dir discord.py-self requests
+
       - name: Run bot
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
@@ -31,70 +31,94 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           cat > bot.py << 'EOF'
-          import os, time, requests
+          import os
+          import sys
+          import time
+          import asyncio
+          import requests
+
           try:
               import discord_self as discord
           except ImportError:
               import discord
 
           TOKEN = os.environ["DISCORD_USER_TOKEN"].strip()
-          # Жёстко чистим CHANNEL_ID от пробелов и кавычек
-          raw_channel_id = os.environ["DISCORD_CHANNEL_ID"].strip().strip('"').strip("'")
-          CHANNEL_ID = int(raw_channel_id)
+          raw_channel_id = os.environ["DISCORD_CHANNEL_ID"].strip()
           WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"].strip()
 
-          print(f"🔧 Запускаюсь с CHANNEL_ID={CHANNEL_ID}")
+          raw_channel_id = raw_channel_id.strip().strip('"').strip("'")
+          CHANNEL_ID = int(raw_channel_id)
 
-          # Интенты (если есть)
-          try:
-              intents = discord.Intents.default()
-              intents.message_content = True
-              intents.guilds = True
-              intents.messages = True
-          except AttributeError:
-              intents = None
+          if not TOKEN or not WEBHOOK_URL or not CHANNEL_ID:
+              print("❌ Не хватает секретов!")
+              sys.exit(1)
+
+          print(f"🔧 Запускаюсь. CHANNEL_ID={CHANNEL_ID}")
+
+          # Интенты
+          intents = discord.Intents.default()
+          intents.message_content = True
+          intents.guilds = True
+          intents.messages = True
 
           class SelfBot(discord.Client):
-              def __init__(self):
-                  if intents:
-                      super().__init__(intents=intents)
-                  else:
-                      super().__init__()
-
               async def on_ready(self):
-                  print(f'✅ Онлайн как {self.user}')
+                  print(f"✅ Онлайн как: {self.user} (id={self.user.id})")
                   ch = self.get_channel(CHANNEL_ID)
                   if ch:
-                      print(f'📡 Найден канал #{ch.name} ({ch.id})')
+                      print(
+                          f"📡 Канал найден: #{getattr(ch, 'name', '???')} ({ch.id})"
+                      )
                   else:
-                      print(f'❌ Канал с ID {CHANNEL_ID} не найден!')
+                      print(f"❌ Канал с ID {CHANNEL_ID} не найден!")
+
+              async def post_to_webhook(self, payload: dict):
+                  try:
+                      # Webhook обычно отвечает 204
+                      r = await asyncio.to_thread(
+                          requests.post, WEBHOOK_URL, json=payload, timeout=15
+                      )
+                      print(f"   -> Webhook: {r.status_code}")
+                  except Exception as e:
+                      print(f"   -> Webhook ошибка: {e}")
 
               async def on_message(self, msg):
-                  # Явное сравнение, убираем свои сообщения
-                  if int(msg.channel.id) != CHANNEL_ID:
-                      return
-                  if msg.author.id == self.user.id:
-                      return
-                  
-                  print(f'📨 {msg.author}: {msg.content}')
-                  
-                  # Отправка в вебхук
                   try:
-                      payload = {
-                          "content": msg.content,
-                          "username": str(msg.author)
-                      }
-                      r = requests.post(WEBHOOK_URL, json=payload)
-                      print(f'   -> Webhook: {r.status_code}')
-                  except Exception as e:
-                      print(f'   -> Webhook ошибка: {e}')
+                      # 1) Фильтр по каналу
+                      msg_channel_id = int(msg.channel.id)
+                      if msg_channel_id != CHANNEL_ID:
+                          return
 
-          bot = SelfBot()
+                      # 2) Не форвардим свои сообщения
+                      if msg.author and msg.author.id == self.user.id:
+                          return
+
+                      content = (msg.content or "").strip()
+                      if not content:
+                          return
+
+                      # лимит для безопасности
+                      if len(content) > 1900:
+                          content = content[:1900] + "…"
+
+                      print(f"📨 {msg.author} ({msg.author.id}): {content}")
+
+                      payload = {
+                          "content": f"📨 **{msg.author}**: {content}",
+                          "username": "Auto Joiner Logger",
+                      }
+
+                      await self.post_to_webhook(payload)
+                  except Exception as e:
+                      print(f"⚠️ on_message error: {e}")
+
+          bot = SelfBot(intents=intents)
+
           while True:
               try:
                   bot.run(TOKEN)
               except Exception as e:
-                  print(f'💥 Крах: {e}')
+                  print(f"💥 Крах: {e}")
                   time.sleep(10)
           EOF
           python bot.py
