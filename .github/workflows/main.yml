@@ -1,68 +1,79 @@
-name: Auto Joiner Log Sender
+name: Auto Joiner 24/7 Server
 
 on:
-  workflow_dispatch:
-    inputs:
-      player_name:
-        description: 'Имя игрока'
-        required: true
-        type: string
-      action:
-        description: 'Что случилось'
-        required: true
-        type: string
-        default: 'joined'
-      details:
-        description: 'Детали'
-        required: false
-        type: string
-        default: 'Нет деталей'
+  workflow_dispatch:      # Ручной запуск
+  schedule:
+    - cron: '0 */6 * * *'  # Автоматически перезапускается каждые 6 часов
 
 jobs:
-  send-to-discord:
+  server:
     runs-on: ubuntu-latest
+    timeout-minutes: 360    # 6 часов максимум
+    
     steps:
-      - name: Отправить лог в Discord
+      - name: Checkout кода
+        uses: actions/checkout@v3
+      
+      - name: Установка Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Установка зависимостей
+        run: pip install discord.py requests
+      
+      - name: Запуск Self-Bot сервера
         env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          PLAYER="${{ inputs.player_name }}"
-          ACTION="${{ inputs.action }}"
-          DETAILS="${{ inputs.details }}"
+          cat > bot_runner.py << 'PYEOF'
+          import discord
+          import requests
+          import os
+          import sys
+          import time
+          from datetime import datetime
+
+          TOKEN = os.environ["DISCORD_USER_TOKEN"]
+          CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+          WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
+
+          class SelfBot(discord.Client):
+              async def on_ready(self):
+                  print(f'✅ [{datetime.now()}] Залетели как: {self.user}')
+                  channel = self.get_channel(CHANNEL_ID)
+                  if channel:
+                      print(f'📡 Мониторю: #{channel.name}')
+                      # Отправляем в вебхук что сервер жив
+                      requests.post(WEBHOOK_URL, json={
+                          "content": f"🟢 **Сервер запущен** в {datetime.now().strftime('%H:%M:%S')}"
+                      })
+                  else:
+                      print(f'❌ Канал {CHANNEL_ID} не найден!')
+
+              async def on_message(self, message):
+                  if message.author == self.user or message.channel.id != CHANNEL_ID:
+                      return
+                  
+                  print(f'📨 {message.author}: {message.content}')
+                  
+                  # Шлём в вебхук
+                  requests.post(WEBHOOK_URL, json={
+                      "content": f"📨 **{message.author.name}**: {message.content}"
+                  })
           
-          # Выбираем эмодзи под тип события
-          case "$ACTION" in
-            joined|join|connected)
-              EMOJI="✅"
-              COLOR=65280
-              ;;
-            left|leave|disconnected)
-              EMOJI="❌"
-              COLOR=16711680
-              ;;
-            error|failed)
-              EMOJI="🚨"
-              COLOR=16753920
-              ;;
-            *)
-              EMOJI="📡"
-              COLOR=3447003
-              ;;
-          esac
+          bot = SelfBot()
           
-          # Отправляем через curl
-          curl -s -H "Content-Type: application/json" \
-               -d "{
-                 \"content\": \"${EMOJI} **${PLAYER}** — ${ACTION}\",
-                 \"embeds\": [{
-                   \"title\": \"Auto Joiner Log\",
-                   \"description\": \"${DETAILS}\",
-                   \"color\": ${COLOR},
-                   \"footer\": {
-                     \"text\": \"Steal a brainrot | Auto Joiner v1.0\"
-                   }
-                 }]
-               }" \
-               $WEBHOOK
+          # Запускаем с авто-реконнектом
+          while True:
+              try:
+                  bot.run(TOKEN)
+              except Exception as e:
+                  print(f'❌ Ошибка: {e}')
+                  print('🔄 Переподключаюсь через 10 сек...')
+                  time.sleep(10)
+          PYEOF
           
-          echo "✅ Лог отправлен в Discord!"
+          python bot_runner.py
