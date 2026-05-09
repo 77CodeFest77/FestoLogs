@@ -1,46 +1,66 @@
-- name: Install deps
-  run: |
-    pip uninstall discord.py -y
-    pip install discord.py-self requests
+name: Auto Joiner 24/7 Server
 
-- name: Run bot
-  env:
-    DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-    DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
-    DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-  run: |
-    cat > bot.py << 'EOF'
-    import discord
-    import requests
-    import os
-    import time
-    from datetime import datetime
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
-    TOKEN = os.environ["DISCORD_USER_TOKEN"]
-    CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
-    WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install deps
+        run: |
+          pip uninstall discord.py -y 2>/dev/null
+          pip install discord.py-self requests
+      
+      - name: Run bot
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          cat > bot.py << 'EOF'
+          import discord
+          import requests
+          import os
+          import time
+          from datetime import datetime
 
-    class SelfBot(discord.Client):
-        async def on_ready(self):
-            print(f'ONLINE as {self.user}')
-            requests.post(WEBHOOK_URL, json={
-                "content": f"🟢 Сервер жив! ({datetime.now().strftime('%H:%M:%S')})"
-            })
+          TOKEN = os.environ["DISCORD_USER_TOKEN"]
+          CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+          WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 
-        async def on_message(self, msg):
-            if msg.author == self.user or msg.channel.id != CHANNEL_ID:
-                return
-            print(f'LOG: {msg.author}: {msg.content}')
-            requests.post(WEBHOOK_URL, json={
-                "content": f"📨 **{msg.author}**: {msg.content}"
-            })
+          class SelfBot(discord.Client):
+              async def on_ready(self):
+                  print(f'ONLINE as {self.user}')
+                  requests.post(WEBHOOK_URL, json={
+                      "content": f"🟢 Сервер запущен ({datetime.now().strftime('%H:%M:%S')})"
+                  })
 
-    bot = SelfBot()
-    while True:
-        try:
-            bot.run(TOKEN)
-        except Exception as e:
-            print(f'ERROR: {e}')
-            time.sleep(10)
-    EOF
-    python bot.py
+              async def on_message(self, msg):
+                  if msg.author == self.user or msg.channel.id != CHANNEL_ID:
+                      return
+                  requests.post(WEBHOOK_URL, json={
+                      "content": f"📨 **{msg.author}**: {msg.content}"
+                  })
+
+          bot = SelfBot()
+          while True:
+              try:
+                  bot.run(TOKEN)
+              except Exception as e:
+                  print(f'ERROR: {e}')
+                  time.sleep(10)
+          EOF
+          python bot.py
