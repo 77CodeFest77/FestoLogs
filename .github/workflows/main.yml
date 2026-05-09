@@ -40,19 +40,40 @@ jobs:
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
           WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 
+          intents = discord.Intents.default()
+          intents.message_content = True
+          intents.guilds = True
+          intents.messages = True
+
           class SelfBot(discord.Client):
+              def __init__(self):
+                  super().__init__(intents=intents)
+
               async def on_ready(self):
                   print(f'ONLINE as {self.user}')
+                  channel = self.get_channel(CHANNEL_ID)
+                  if channel:
+                      print(f'Monitoring: #{channel.name} in {channel.guild.name}')
+                  else:
+                      print(f'CHANNEL NOT FOUND! Check ID: {CHANNEL_ID}')
 
               async def on_message(self, msg):
-                  if msg.author == self.user or msg.channel.id != CHANNEL_ID:
+                  if msg.channel.id != CHANNEL_ID:
                       return
-                  # Просто пересылаем контент
-                  requests.post(WEBHOOK_URL, json={
-                      "content": msg.content,
-                      "username": str(msg.author),
-                      "avatar_url": str(msg.author.avatar.url) if msg.author.avatar else None
-                  })
+                  if msg.author == self.user:
+                      return
+                  
+                  print(f'MSG: {msg.author}: {msg.content}')
+                  
+                  try:
+                      r = requests.post(WEBHOOK_URL, json={
+                          "content": msg.content,
+                          "username": str(msg.author),
+                          "avatar_url": str(msg.author.avatar.url) if msg.author.avatar else None
+                      })
+                      print(f'Webhook response: {r.status_code}')
+                  except Exception as e:
+                      print(f'Webhook error: {e}')
 
           bot = SelfBot()
           while True:
