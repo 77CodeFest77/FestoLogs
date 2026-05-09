@@ -20,7 +20,9 @@ jobs:
           python-version: '3.10'
       
       - name: Install deps
-        run: pip install discord.py-self requests
+        run: |
+          pip install discord.py-self requests
+          pip list | grep -i discord  # покажет, что реально встало
       
       - name: Run bot
         env:
@@ -29,14 +31,10 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           cat > bot.py << 'EOF'
-          import os, time, requests
-
-          # Пытаемся импортировать правильный модуль
-          try:
-              import discord
-              _ = discord.Intents  # проверка
-          except (ImportError, AttributeError):
-              import discord_self as discord
+          import discord
+          import requests
+          import os
+          import time
 
           TOKEN = os.environ["DISCORD_USER_TOKEN"]
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
