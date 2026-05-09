@@ -2,8 +2,8 @@ name: FestoLogs Bot
 
 on:
   schedule:
-    - cron: '0 */6 * * *'      # каждые 6 часов
-  workflow_dispatch:             # ручной запуск
+    - cron: '0 */6 * * *'   # каждые 6 часов
+  workflow_dispatch:          # ручной запуск
 
 jobs:
   run:
@@ -16,13 +16,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install deps
+      - name: Установка зависимостей
         run: |
           pip uninstall discord -y 2>/dev/null || true
           pip install --upgrade pip
           pip install discord.py requests
 
-      - name: Run bot
+      - name: Запуск бота
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: python bot.py
