@@ -1,139 +1,31 @@
-name: FestoLogs Bot
+name: Run FestoLogs Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    # Запуск каждые 6 часов – даёт почти непрерывную работу с перезапуском
+    - cron: '0 */6 * * *'
+  workflow_dispatch:   # можно запустить вручную
 
 jobs:
   bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360   # 6 часов – максимальное время одного запуска для публичных репозиториев
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip uninstall discord discord.py discord.py-self discord_self -y 2>/dev/null || true
-          pip install --no-cache-dir discord.py-self requests
+          pip uninstall discord -y || true
+          pip install discord.py requests
 
       - name: Run bot
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-        run: |
-          cat > bot.py << 'EOF'
-          import os
-          import sys
-          import time
-          import asyncio
-          import requests
-
-          try:
-              import discord_self as discord
-          except ImportError:
-              import discord
-
-          # ================== НАСТРОЙКИ ==================
-          CHANNEL_ID = 1401775181025775738
-          WEBHOOK_URL = (
-              "https://discord.com/api/webhooks/1462757260659916890/"
-              "RDh5763wE364uxKkVkXt_lyslZ8nwubNIuJutkntFBbyTjI-6bgd9CChrVccpASv6f-b"
-          )
-          # ===============================================
-
-          TOKEN = os.environ.get("DISCORD_USER_TOKEN", "").strip()
-          if not TOKEN:
-              print("❌ DISCORD_USER_TOKEN не задан в GitHub Secrets.")
-              sys.exit(1)
-
-          if not WEBHOOK_URL:
-              print("❌ WEBHOOK_URL не задан.")
-              sys.exit(1)
-
-          INT_CHANNEL_ID = int(CHANNEL_ID)
-
-          intents = discord.Intents.default()
-          intents.message_content = True
-          intents.guilds = True
-          intents.messages = True
-
-
-          def truncate(text: str, n: int = 1900) -> str:
-              text = (text or "").strip()
-              if len(text) <= n:
-                  return text
-              return text[:n] + "…"
-
-
-          class SelfBot(discord.Client):
-              async def on_ready(self):
-                  print(f"✅ Online as: {self.user} (id={self.user.id})")
-                  ch = self.get_channel(INT_CHANNEL_ID)
-                  if ch:
-                      print(f"📡 Channel found: #{getattr(ch, 'name', '???')} ({ch.id})")
-                  else:
-                      print(
-                          f"⚠️ Channel {INT_CHANNEL_ID} not found in cache; still will try by ID."
-                      )
-
-              async def post_to_webhook(self, payload: dict):
-                  def do_post():
-                      return requests.post(WEBHOOK_URL, json=payload, timeout=15)
-
-                  try:
-                      r = await asyncio.to_thread(do_post)
-                      print(f"   -> Webhook: {r.status_code}")
-                  except Exception as e:
-                      print(f"   -> Webhook error: {e}")
-
-              async def on_message(self, msg):
-                  try:
-                      if not getattr(self, "user", None):
-                          return
-
-                      channel = getattr(msg, "channel", None)
-                      if not channel:
-                          return
-
-                      if int(channel.id) != INT_CHANNEL_ID:
-                          return
-
-                      # не форвардим свои сообщения
-                      if msg.author and msg.author.id == self.user.id:
-                          return
-
-                      content = truncate(getattr(msg, "content", "") or "")
-                      if not content:
-                          return
-
-                      author = str(msg.author)
-                      print(f"📨 {author} ({msg.author.id}): {content}")
-
-                      payload = {
-                          "content": f"📨 **{author}**: {content}",
-                          "username": "FestoLogs Bot",
-                      }
-                      await self.post_to_webhook(payload)
-                  except Exception as e:
-                      print(f"⚠️ on_message error: {e}")
-
-
-          if __name__ == "__main__":
-              bot = SelfBot(intents=intents)
-
-              while True:
-                  try:
-                      bot.run(TOKEN)
-                  except Exception as e:
-                      print(f"💥 Crash: {e}")
-                      time.sleep(10)
-          EOF
-          python bot.py
-
+        run: python bot.py
