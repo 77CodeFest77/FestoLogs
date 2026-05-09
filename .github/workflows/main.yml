@@ -35,7 +35,6 @@ jobs:
           import requests
           import os
           import time
-          from datetime import datetime
 
           TOKEN = os.environ["DISCORD_USER_TOKEN"]
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
@@ -44,15 +43,15 @@ jobs:
           class SelfBot(discord.Client):
               async def on_ready(self):
                   print(f'ONLINE as {self.user}')
-                  requests.post(WEBHOOK_URL, json={
-                      "content": f"🟢 Сервер запущен ({datetime.now().strftime('%H:%M:%S')})"
-                  })
 
               async def on_message(self, msg):
                   if msg.author == self.user or msg.channel.id != CHANNEL_ID:
                       return
+                  # Просто пересылаем контент
                   requests.post(WEBHOOK_URL, json={
-                      "content": f"📨 **{msg.author}**: {msg.content}"
+                      "content": msg.content,
+                      "username": str(msg.author),
+                      "avatar_url": str(msg.author.avatar.url) if msg.author.avatar else None
                   })
 
           bot = SelfBot()
