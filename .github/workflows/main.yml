@@ -1,0 +1,68 @@
+name: Auto Joiner Log Sender
+
+on:
+  workflow_dispatch:
+    inputs:
+      player_name:
+        description: 'Имя игрока'
+        required: true
+        type: string
+      action:
+        description: 'Что случилось'
+        required: true
+        type: string
+        default: 'joined'
+      details:
+        description: 'Детали'
+        required: false
+        type: string
+        default: 'Нет деталей'
+
+jobs:
+  send-to-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отправить лог в Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          PLAYER="${{ inputs.player_name }}"
+          ACTION="${{ inputs.action }}"
+          DETAILS="${{ inputs.details }}"
+          
+          # Выбираем эмодзи под тип события
+          case "$ACTION" in
+            joined|join|connected)
+              EMOJI="✅"
+              COLOR=65280
+              ;;
+            left|leave|disconnected)
+              EMOJI="❌"
+              COLOR=16711680
+              ;;
+            error|failed)
+              EMOJI="🚨"
+              COLOR=16753920
+              ;;
+            *)
+              EMOJI="📡"
+              COLOR=3447003
+              ;;
+          esac
+          
+          # Отправляем через curl
+          curl -s -H "Content-Type: application/json" \
+               -d "{
+                 \"content\": \"${EMOJI} **${PLAYER}** — ${ACTION}\",
+                 \"embeds\": [{
+                   \"title\": \"Auto Joiner Log\",
+                   \"description\": \"${DETAILS}\",
+                   \"color\": ${COLOR},
+                   \"footer\": {
+                     \"text\": \"Steal a brainrot | Auto Joiner v1.0\"
+                   }
+                 }]
+               }" \
+               $WEBHOOK
+          
+          echo "✅ Лог отправлен в Discord!"
