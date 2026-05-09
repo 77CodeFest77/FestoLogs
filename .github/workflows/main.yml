@@ -21,8 +21,12 @@ jobs:
       
       - name: Install deps
         run: |
-          pip install discord.py-self requests
-          pip list | grep -i discord  # покажет, что реально встало
+          pip uninstall discord discord.py discord.py-self -y 2>/dev/null || true
+          pip install --force-reinstall --no-cache-dir discord.py-self requests
+          echo "========== Installed packages =========="
+          pip list | grep -i discord
+          echo "========================================"
+          python -c "import discord_self; print('discord_self found:', discord_self.__version__)" || echo "discord_self NOT found"
       
       - name: Run bot
         env:
@@ -31,23 +35,36 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           cat > bot.py << 'EOF'
-          import discord
-          import requests
-          import os
-          import time
+          import os, time, requests
+          
+          # Пробуем discord_self (правильный модуль self-бота)
+          try:
+              import discord_self as discord
+              print("✅ Using discord_self")
+          except ImportError:
+              import discord
+              print("⚠️ Using discord (may not work)")
 
           TOKEN = os.environ["DISCORD_USER_TOKEN"]
           CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
           WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 
-          intents = discord.Intents.default()
-          intents.message_content = True
-          intents.guilds = True
-          intents.messages = True
+          # Настройка интентов (есть в discord_self)
+          try:
+              intents = discord.Intents.default()
+              intents.message_content = True
+              intents.guilds = True
+              intents.messages = True
+          except AttributeError:
+              # Если Intents нет, создаём клиент без них
+              intents = None
 
           class SelfBot(discord.Client):
               def __init__(self):
-                  super().__init__(intents=intents)
+                  if intents:
+                      super().__init__(intents=intents)
+                  else:
+                      super().__init__()
 
               async def on_ready(self):
                   print(f'ONLINE as {self.user}')
