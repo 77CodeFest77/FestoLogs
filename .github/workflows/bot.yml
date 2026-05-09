@@ -1,9 +1,9 @@
-name: Discord Bot
+name: FestoLogs Bot
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: "0 */6 * * *"
 
 jobs:
   bot:
@@ -12,14 +12,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           pip uninstall discord discord.py discord.py-self discord_self -y 2>/dev/null || true
           pip install --no-cache-dir discord.py-self requests
@@ -40,25 +40,24 @@ jobs:
           except ImportError:
               import discord
 
-
-          # ====== ВСТАВЬ СЮДА СВОИ ЗНАЧЕНИЯ ======
-          CHANNEL_ID = 123456789012345678  # <-- замени на ID ТВОЕГО КАНАЛА
-          WEBHOOK_URL = "https://discord.com/api/webhooks/XXXX/YYY"  # <-- замени
-          # ======================================
-
+          # ================== НАСТРОЙКИ ==================
+          CHANNEL_ID = 1401775181025775738
+          WEBHOOK_URL = (
+              "https://discord.com/api/webhooks/1462757260659916890/"
+              "RDh5763wE364uxKkVkXt_lyslZ8nwubNIuJutkntFBbyTjI-6bgd9CChrVccpASv6f-b"
+          )
+          # ===============================================
 
           TOKEN = os.environ.get("DISCORD_USER_TOKEN", "").strip()
           if not TOKEN:
-              print("❌ DISCORD_USER_TOKEN не задан в secrets.")
+              print("❌ DISCORD_USER_TOKEN не задан в GitHub Secrets.")
               sys.exit(1)
 
-          if not WEBHOOK_URL or WEBHOOK_URL.startswith("https://discord.com/api/webhooks/XXXX"):
-              print("❌ WEBHOOK_URL не заменён в коде.")
+          if not WEBHOOK_URL:
+              print("❌ WEBHOOK_URL не задан.")
               sys.exit(1)
 
-          if not CHANNEL_ID:
-              print("❌ CHANNEL_ID не задан в коде.")
-              sys.exit(1)
+          INT_CHANNEL_ID = int(CHANNEL_ID)
 
           intents = discord.Intents.default()
           intents.message_content = True
@@ -66,52 +65,60 @@ jobs:
           intents.messages = True
 
 
+          def truncate(text: str, n: int = 1900) -> str:
+              text = (text or "").strip()
+              if len(text) <= n:
+                  return text
+              return text[:n] + "…"
+
+
           class SelfBot(discord.Client):
               async def on_ready(self):
                   print(f"✅ Online as: {self.user} (id={self.user.id})")
-                  ch = self.get_channel(CHANNEL_ID)
+                  ch = self.get_channel(INT_CHANNEL_ID)
                   if ch:
-                      print(
-                          f"📡 Channel found: #{getattr(ch, 'name', '???')} ({ch.id})"
-                      )
+                      print(f"📡 Channel found: #{getattr(ch, 'name', '???')} ({ch.id})")
                   else:
-                      print(f"❌ Channel with ID {CHANNEL_ID} not found in cache")
+                      print(
+                          f"⚠️ Channel {INT_CHANNEL_ID} not found in cache; still will try by ID."
+                      )
 
               async def post_to_webhook(self, payload: dict):
+                  def do_post():
+                      return requests.post(WEBHOOK_URL, json=payload, timeout=15)
+
                   try:
-                      r = await asyncio.to_thread(
-                          requests.post, WEBHOOK_URL, json=payload, timeout=15
-                      )
+                      r = await asyncio.to_thread(do_post)
                       print(f"   -> Webhook: {r.status_code}")
                   except Exception as e:
                       print(f"   -> Webhook error: {e}")
 
               async def on_message(self, msg):
                   try:
-                      # msg.channel нужен всегда, иначе фильтр по каналу упадёт
-                      if not getattr(msg, "channel", None):
+                      if not getattr(self, "user", None):
                           return
 
-                      # фильтр: только нужный канал
-                      if int(msg.channel.id) != int(CHANNEL_ID):
+                      channel = getattr(msg, "channel", None)
+                      if not channel:
                           return
 
-                      # не форвардим сообщения автора-бота (свой же self-bot)
-                      if msg.author and self.user and msg.author.id == self.user.id:
+                      if int(channel.id) != INT_CHANNEL_ID:
                           return
 
-                      content = (msg.content or "").strip()
+                      # не форвардим свои сообщения
+                      if msg.author and msg.author.id == self.user.id:
+                          return
+
+                      content = truncate(getattr(msg, "content", "") or "")
                       if not content:
                           return
 
-                      if len(content) > 1900:
-                          content = content[:1900] + "…"
-
-                      print(f"📨 {msg.author} ({msg.author.id}): {content}")
+                      author = str(msg.author)
+                      print(f"📨 {author} ({msg.author.id}): {content}")
 
                       payload = {
-                          "content": f"📨 **{msg.author}**: {content}",
-                          "username": "Auto Joiner Logger",
+                          "content": f"📨 **{author}**: {content}",
+                          "username": "FestoLogs Bot",
                       }
                       await self.post_to_webhook(payload)
                   except Exception as e:
@@ -120,6 +127,7 @@ jobs:
 
           if __name__ == "__main__":
               bot = SelfBot(intents=intents)
+
               while True:
                   try:
                       bot.run(TOKEN)
@@ -128,3 +136,4 @@ jobs:
                       time.sleep(10)
           EOF
           python bot.py
+
