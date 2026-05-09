@@ -1,5 +1,7 @@
 import os
+import sys
 import time
+import asyncio
 import requests
 
 try:
@@ -7,95 +9,102 @@ try:
 except ImportError:
     import discord
 
+# ====== НАСТРОЙКИ: ЗАПОЛНИ СЕЙЧАС ======
+CHANNEL_ID = 1401775181025775738
+WEBHOOK_URL = "https://discord.com/api/webhooks/1462757260659916890/RDh5763wE364uxKkVkXt_lyslZ8nwubNIuJutkntFBbyTjI-6bgd9CChrVccpASv6f-b"
+# =======================================
 
-def require_env(name: str) -> str:
-    value = os.environ.get(name, "")
-    value = value.strip().strip('"').strip("'")
-    if not value:
-        raise RuntimeError(f"Пустая переменная окружения: {name}")
-    return value
+TOKEN = os.environ.get("DISCORD_USER_TOKEN", "").strip()
+if not TOKEN:
+    print("❌ DISCORD_USER_TOKEN не задан в GitHub Secrets.")
+    sys.exit(1)
+
+if not WEBHOOK_URL:
+    print("❌ WEBHOOK_URL не задан в коде.")
+    sys.exit(1)
+
+if not CHANNEL_ID:
+    print("❌ CHANNEL_ID не задан в коде.")
+    sys.exit(1)
+
+INT_CHANNEL_ID = int(CHANNEL_ID)
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.messages = True
 
 
-TOKEN = require_env("DISCORD_USER_TOKEN")
-
-raw_channel_id = require_env("DISCORD_CHANNEL_ID")
-try:
-    CHANNEL_ID = int(raw_channel_id)
-except ValueError:
-    raise RuntimeError(
-        f"DISCORD_CHANNEL_ID не является числом: {raw_channel_id!r}"
-    )
-
-WEBHOOK_URL = require_env("DISCORD_WEBHOOK_URL")
-
-print(f"🔧 Запускаюсь с CHANNEL_ID={CHANNEL_ID}")
-print("🔧 Проверка env: OK (токен/вебхук не печатаю)")
-
-
-intents = None
-try:
-    intents = discord.Intents.default()
-    intents.message_content = True
-    intents.guilds = True
-    intents.messages = True
-except Exception:
-    intents = None
+def truncate(s: str, n: int = 1900) -> str:
+    s = s or ""
+    if len(s) <= n:
+        return s
+    return s[:n] + "…"
 
 
 class SelfBot(discord.Client):
-    def __init__(self):
-        if intents is not None:
-            super().__init__(intents=intents)
-        else:
-            super().__init__()
-
     async def on_ready(self):
-        print(f"✅ Онлайн как: {self.user}")
-        ch = self.get_channel(CHANNEL_ID)
+        print(f"✅ Online as: {self.user} (id={self.user.id})")
+
+        ch = self.get_channel(INT_CHANNEL_ID)
         if ch:
-            print(f"📡 Канал: #{getattr(ch, 'name', '???')} ({ch.id})")
+            name = getattr(ch, "name", "???")
+            print(f"📡 Канал найден: #{name} ({ch.id})")
         else:
-            print(f"❌ Канал с ID {CHANNEL_ID} не найден в кэше")
+            print(
+                f"❌ Канал с ID {INT_CHANNEL_ID} не найден в cache. "
+                "Возможно, нужно другое id (например, thread id)."
+            )
 
-    async def on_message(self, msg):
-        if not getattr(self, "user", None):
-            return
-
-        # игнор своих
-        if msg.author and msg.author.id == self.user.id:
-            return
-
-        # фильтр по каналу
-        if not getattr(msg, "channel", None):
-            return
-        if int(msg.channel.id) != CHANNEL_ID:
-            return
-
-        content = (msg.content or "").strip()
-        if not content:
-            return
-
-        print(f"📨 {msg.author}: {content[:120]}")
-
-        payload = {
-            "content": f"📨 **{msg.author.name}**: {content}",
-            "username": "Auto Joiner Logger",
-        }
-
+    async def post_to_webhook(self, payload: dict):
         try:
-            r = await self.loop.run_in_executor(
-                None, lambda: requests.post(WEBHOOK_URL, json=payload, timeout=15)
+            r = await asyncio.to_thread(
+                requests.post, WEBHOOK_URL, json=payload, timeout=15
             )
             print(f"   -> Webhook: {r.status_code}")
         except Exception as e:
-            print(f"   -> Webhook ошибка: {e}")
+            print(f"   -> Webhook error: {e}")
+
+    async def on_message(self, msg):
+        try:
+            if not getattr(msg, "channel", None):
+                return
+            if not getattr(msg, "author", None):
+                return
+            if not self.user:
+                return
+
+            # Фильтр только нужного канала
+            if int(msg.channel.id) != INT_CHANNEL_ID:
+                return
+
+            # Не форвардим свои сообщения self-bot'а
+            if msg.author.id == self.user.id:
+                return
+
+            content = truncate(getattr(msg, "content", "") or "").strip()
+            if not content:
+                return
+
+            author = str(msg.author)
+            print(f"📨 {author} ({msg.author.id}): {content}")
+
+            payload = {
+                "content": f"📨 **{author}**: {content}",
+                "username": "Auto Joiner Logger",
+            }
+            await self.post_to_webhook(payload)
+
+        except Exception as e:
+            print(f"⚠️ on_message error: {e}")
 
 
 if __name__ == "__main__":
-    bot = SelfBot()
+    bot = SelfBot(intents=intents)
+
     while True:
         try:
             bot.run(TOKEN)
         except Exception as e:
-            print(f"💥 Крах: {e}")
+            print(f"💥 Crash: {e}")
             time.sleep(10)
