@@ -2,35 +2,27 @@ name: FestoLogs Bot
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'      # каждые 6 часов
+  workflow_dispatch:             # ручной запуск
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 📦 Install dependencies
+      - name: Install deps
         run: |
           pip uninstall discord -y 2>/dev/null || true
           pip install --upgrade pip
           pip install discord.py requests
-          pip list | grep -E "discord|requests"
 
-      - name: 🤖 Run bot
+      - name: Run bot
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-        run: |
-          if [ -z "$DISCORD_USER_TOKEN" ]; then
-            echo "❌ DISCORD_USER_TOKEN is empty! Check your secret."
-            exit 1
-          fi
-          echo "Starting bot..."
-          python bot.py
+        run: python bot.py
