@@ -32,21 +32,20 @@ jobs:
         run: |
           cat > bot.py << 'EOF'
           import os, time, requests
-          
-          # Пробуем discord_self, если нет — обычный discord
           try:
               import discord_self as discord
-              print("✅ Использую discord_self")
           except ImportError:
               import discord
-              print("⚠️ Использую обычный discord")
-          
-          TOKEN = os.environ["DISCORD_USER_TOKEN"]
-          CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
-          WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
-          print(f"Целевой канал ID: {CHANNEL_ID}")
-          print(f"Webhook URL: {WEBHOOK_URL[:50]}...")  # первые 50 символов для проверки
-          
+
+          TOKEN = os.environ["DISCORD_USER_TOKEN"].strip()
+          # Жёстко чистим CHANNEL_ID от пробелов и кавычек
+          raw_channel_id = os.environ["DISCORD_CHANNEL_ID"].strip().strip('"').strip("'")
+          CHANNEL_ID = int(raw_channel_id)
+          WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"].strip()
+
+          print(f"🔧 Запускаюсь с CHANNEL_ID={CHANNEL_ID}")
+
+          # Интенты (если есть)
           try:
               intents = discord.Intents.default()
               intents.message_content = True
@@ -54,50 +53,48 @@ jobs:
               intents.messages = True
           except AttributeError:
               intents = None
-          
+
           class SelfBot(discord.Client):
               def __init__(self):
                   if intents:
                       super().__init__(intents=intents)
                   else:
                       super().__init__()
-          
+
               async def on_ready(self):
-                  print(f'ONLINE as {self.user}')
-                  channel = self.get_channel(CHANNEL_ID)
-                  if channel:
-                      print(f'Мониторю канал: #{channel.name} на сервере {channel.guild.name}')
+                  print(f'✅ Онлайн как {self.user}')
+                  ch = self.get_channel(CHANNEL_ID)
+                  if ch:
+                      print(f'📡 Найден канал #{ch.name} ({ch.id})')
                   else:
-                      print(f'КАНАЛ НЕ НАЙДЕН! Проверь ID: {CHANNEL_ID}')
-          
+                      print(f'❌ Канал с ID {CHANNEL_ID} не найден!')
+
               async def on_message(self, msg):
-                  # Диагностика: показываем ВСЕ сообщения, которые видит бот
-                  print(f'DEBUG: Канал {msg.channel.id} | Автор ID {msg.author.id} | Бот ID {self.user.id}')
-                  print(f'DEBUG: Сообщение: {msg.content}')
-                  
-                  # Проверяем только канал, автора не фильтруем (может глючить)
-                  if msg.channel.id != CHANNEL_ID:
-                      print(f'DEBUG: Пропускаю (не тот канал)')
+                  # Явное сравнение, убираем свои сообщения
+                  if int(msg.channel.id) != CHANNEL_ID:
+                      return
+                  if msg.author.id == self.user.id:
                       return
                   
-                  print(f'>>>> ПЕРЕСЫЛАЮ: {msg.author}: {msg.content}')
+                  print(f'📨 {msg.author}: {msg.content}')
+                  
+                  # Отправка в вебхук
                   try:
-                      # Отправляем без аватарки, чтобы исключить ошибку с ней
                       payload = {
                           "content": msg.content,
                           "username": str(msg.author)
                       }
                       r = requests.post(WEBHOOK_URL, json=payload)
-                      print(f'Webhook ответ: {r.status_code} {r.text}')
+                      print(f'   -> Webhook: {r.status_code}')
                   except Exception as e:
-                      print(f'Webhook ошибка: {e}')
-          
+                      print(f'   -> Webhook ошибка: {e}')
+
           bot = SelfBot()
           while True:
               try:
                   bot.run(TOKEN)
               except Exception as e:
-                  print(f'ERROR: {e}')
+                  print(f'💥 Крах: {e}')
                   time.sleep(10)
           EOF
           python bot.py
