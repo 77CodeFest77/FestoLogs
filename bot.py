@@ -1,81 +1,100 @@
 import os
 import sys
-import time
 import asyncio
-import requests
+import aiohttp
 import discord
+from discord.ext import commands, tasks
 
-# ---------- НАСТРОЙКИ ----------
+# ---------- КОНФИГУРАЦИЯ ----------
 TOKEN = os.environ.get("DISCORD_USER_TOKEN", "")
-if not TOKEN:
-    print("❌ DISCORD_USER_TOKEN не задан в переменных окружения.")
-    sys.exit(1)
-
-INT_CHANNEL_ID = 1401775181025775738
+SOURCE_CHANNEL_ID = 1401775181025775738
 WEBHOOK_URL = "https://discord.com/api/webhooks/1462757260659916890/RDh5763wE364uxKkVkXt_lyslZ8nwubNIuJutkntFBbyTjI-6bgd9CChrVccpASv6f-b"
 
-# ---------- ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА ТОКЕНА ----------
-print("🔍 Проверяю токен...")
-headers = {"Authorization": TOKEN}
-try:
-    r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=10)
-    if r.status_code == 200:
-        data = r.json()
-        print(f"✅ Токен действителен! Пользователь: {data['username']}#{data['discriminator']} (ID: {data['id']})")
-    elif r.status_code == 401:
-        print("❌ Токен НЕВЕРЕН (401 Unauthorized).")
-        print("   Причина: токен просрочен, отозван или это токен бота, а не пользователя.")
-        sys.exit(1)
-    else:
-        print(f"⚠️ Неожиданный ответ: {r.status_code} {r.text[:200]}")
-        sys.exit(1)
-except Exception as e:
-    print(f"❌ Ошибка подключения: {e}")
+if not TOKEN:
+    print("❌ DISCORD_USER_TOKEN MISSING")
     sys.exit(1)
 
-# ---------- ОСТАЛЬНОЙ КОД ----------
-def truncate(text: str, max_len: int = 1500) -> str:
-    return text if len(text) <= max_len else text[:max_len-3] + "..."
+# ---------- ЛОГИКА FESTKA ----------
+class FestkaForwarder(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.session = None
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.guilds = True
-intents.message_content = True
+    async def setup_hook(self):
+        # Инициализация асинхронной сессии при запуске
+        self.session = aiohttp.ClientSession()
+        self.check_connection.start()
 
-class Forwarder(discord.Client):
     async def on_ready(self):
-        print(f"✅ Бот запущен как {self.user}")
+        print(f"--- Festka System Online ---")
+        print(f"Logged as: {self.user}")
+        print(f"Monitoring ID: {SOURCE_CHANNEL_ID}")
+        print(f"----------------------------")
 
-    async def on_message(self, msg):
-        if not self.user or not msg.channel or msg.channel.id != INT_CHANNEL_ID:
-            return
-        if msg.author.id == self.user.id:
-            return
-        text = truncate(msg.content or "")
-        if not text:
-            return
+    @tasks.loop(minutes=5)
+    async def check_connection(self):
+        if self.is_closed():
+            print("🔄 Reconnecting...")
 
-        author = str(msg.author)
-        print(f"📨 {author}: {text}")
+    async def send_to_webhook(self, author, content, attachments=None):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        
+        webhook = discord.Webhook.from_url(WEBHOOK_URL, session=self.session)
+        
+        # Создание эмбеда для чистого и красивого лога
+        embed = discord.Embed(
+            description=content or "*Пустое сообщение*",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_author(
+            name=str(author), 
+            icon_url=author.avatar.url if author.avatar else None
+        )
+        
+        if attachments:
+            file_list = "\n".join([att.url for att in attachments])
+            embed.add_field(name="Вложения", value=file_list)
 
-        payload = {
-            "content": f"📨 **{author}**: {text}",
-            "username": "FestoLogs"
-        }
         try:
-            r = await asyncio.to_thread(requests.post, WEBHOOK_URL, json=payload, timeout=10)
-            print(f"   -> Webhook: {r.status_code}")
+            await webhook.send(
+                embed=embed,
+                username="Festka Logger",
+                avatar_url="https://i.imgur.com/8N7S6fC.png"
+            )
         except Exception as e:
-            print(f"   -> Webhook error: {e}")
+            print(f"⚠️ Webhook Error: {e}")
 
+    async def on_message(self, message):
+        # Фильтрация: только нужный канал и игнор самого себя
+        if message.channel.id != SOURCE_CHANNEL_ID:
+            return
+        
+        if message.author.id == self.user.id:
+            return
+
+        print(f"📩 Log captured from {message.author}")
+        await self.send_to_webhook(message.author, message.content, message.attachments)
+
+    async def close(self):
+        if self.session:
+            await self.session.close()
+        await super().close()
+
+# ---------- ЗАПУСК ----------
 if __name__ == "__main__":
-    while True:
-        bot = Forwarder(intents=intents)
-        try:
-            bot.run(TOKEN)
-        except discord.LoginFailure:
-            print("❌ Критическая ошибка входа. Проверь токен.")
-            sys.exit(1)
-        except Exception as e:
-            print(f"💥 Сбой: {e}. Перезапуск через 15 секунд...")
-            time.sleep(15)
+    # Настройка интентов для работы с сообщениями (Self-bot/User-bot mode)
+    intents = discord.Intents.default()
+    intents.message_content = True 
+    intents.messages = True
+    intents.guilds = True
+
+    client = FestkaForwarder(intents=intents)
+
+    try:
+        client.run(TOKEN)
+    except discord.LoginFailure:
+        print("❌ CRITICAL: Invalid Discord Token")
+    except Exception as e:
+        print(f"💥 CRITICAL ERROR: {e}")
